@@ -62,6 +62,11 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // Force the new SW to activate immediately without waiting for
+        // existing tabs to close, then claim all open clients so they
+        // switch to the new bundle in the same session.
+        skipWaiting: true,
+        clientsClaim: true,
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
         // Prevent the service worker from intercepting API routes.
         // This is critical: /api/* paths (login, callback, logout) must
