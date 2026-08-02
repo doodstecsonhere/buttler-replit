@@ -36,9 +36,6 @@ export function RestroomCard({ name, latitude, longitude, address, access, fee, 
       <div className="flex justify-between items-start gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 mb-0.5">
-            {bidet && (
-              <span className="text-xs font-bold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Bidet</span>
-            )}
             {audited && (
               <span className="text-xs font-bold px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 flex items-center gap-0.5">
                 <span>✓</span> Verified
