@@ -1120,5 +1120,6 @@ export const RESTROOMS: Restroom[] = [
   { id: 1165, name: 'iStore', latitude: 9.3223396, longitude: 123.3118918, address: null, access: 'customers', fee: 'no', bidet: false },
   { id: 1166, name: 'nuts and bolts parts', latitude: 9.3299672, longitude: 123.2955281, address: null, access: 'customers', fee: 'no', bidet: false },
   { id: 1167, name: 'oz racing', latitude: 9.2948811, longitude: 123.2997752, address: null, access: 'customers', fee: 'no', bidet: false },
-  { id: 1168, name: 'xd production', latitude: 9.3061297, longitude: 123.3000083, address: null, access: 'customers', fee: 'no', bidet: false }
+  { id: 1168, name: 'xd production', latitude: 9.3061297, longitude: 123.3000083, address: null, access: 'customers', fee: 'no', bidet: false },
+  { id: 1169, name: 'Powerswing Motor Vehicle Inspection Center', latitude: 9.320313, longitude: 123.296437, address: 'EJ Blanco Drive, Dumaguete City', access: 'customers', fee: 'no', bidet: true }
 ];
