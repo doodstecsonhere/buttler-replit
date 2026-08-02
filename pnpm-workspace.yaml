@@ -38,6 +38,7 @@ onlyBuiltDependencies:
   - unrs-resolver
 
 overrides:
+  'postcss': ^8.5.18
   '@babel/plugin-transform-modules-systemjs': ^7.29.7
   'lodash': ^4.18.1
   'picomatch@^2': ^2.3.2
