@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
-import type { Location } from '@/hooks/use-geolocation';
+import { GEOLOCATION_TIMEOUT_MS, type Location } from '@/hooks/use-geolocation';
 
 export interface Restroom {
   id: number;
@@ -20,6 +20,7 @@ interface MapProps {
   restrooms: Restroom[];
   userLocation: Location | null;
   geoError?: string | null;
+  locationLoading: boolean;
   defaultCenter: [number, number];
   auditedIds: Set<number>;
   isAuthenticated: boolean;
@@ -95,23 +96,35 @@ if (typeof document !== 'undefined' && !document.getElementById('buttler-pulse-s
 // subtree so only the green dot Marker re-renders on position change.
 
 const LOCATE_MSG = 'Location access needed to show user location.';
-const STARTUP_ZOOM = 17;
-const FALLBACK_ZOOM = 15;
+const INITIAL_ZOOM = 15;
+const LOCATE_ZOOM = 17;
+
+function InitialViewport({ center }: { center: [number, number] }) {
+  const map = useMap();
+  const initialized = useRef(false);
+
+  useEffect(() => {
+    if (initialized.current) return;
+    initialized.current = true;
+    map.setView(center, INITIAL_ZOOM, { animate: false });
+  }, [center, map]);
+
+  return null;
+}
 
 interface LocateButtonProps {
   autoLocation: Location | null;
   autoError?: string | null;
-  fallbackCenter: [number, number];
 }
 
-function LocateButton({ autoLocation, autoError, fallbackCenter }: LocateButtonProps) {
+function LocateButton({ autoLocation, autoError }: LocateButtonProps) {
   const map = useMap();
-  const [locatedPos, setLocatedPos] = useState<[number, number] | null>(null);
+  const [locatedPos, setLocatedPos] = useState<[number, number] | null>(
+    autoLocation ? [autoLocation.lat, autoLocation.lng] : null,
+  );
   const [toast, setToast] = useState<string | null>(null);
   const [locating, setLocating] = useState(false);
 
-  // hasFit: ensures auto-centering fires exactly once on initial load.
-  const hasFit = useRef(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showToast = useCallback((msg: string) => {
@@ -120,24 +133,13 @@ function LocateButton({ autoLocation, autoError, fallbackCenter }: LocateButtonP
     toastTimer.current = setTimeout(() => setToast(null), 3500);
   }, []);
 
-  // ── Auto-locate on startup ────────────────────────────────────────────────
+  // The map is mounted only after the initial location lookup resolves, so it
+  // already has its final startup center. Do not fly or setView here: doing so
+  // creates a visible world-view-to-city zoom sequence and stretches tiles.
   useEffect(() => {
-    if (hasFit.current) return;
-    if (!autoLocation) return;
-    hasFit.current = true;
-    const coords: [number, number] = [autoLocation.lat, autoLocation.lng];
-    setLocatedPos(coords);
-    map.flyTo(coords, STARTUP_ZOOM, { animate: true, duration: 1.0 });
-  }, [autoLocation, map]);
-
-  useEffect(() => {
-    if (hasFit.current) return;
     if (!autoError) return;
-    // Only trigger fallback once geolocation has definitively failed.
-    hasFit.current = true;
-    map.setView(fallbackCenter, FALLBACK_ZOOM);
     showToast(LOCATE_MSG);
-  }, [autoError, fallbackCenter, map, showToast]);
+  }, [autoError, showToast]);
 
   // ── FAB tap ───────────────────────────────────────────────────────────────
   const handleLocate = useCallback(() => {
@@ -148,10 +150,10 @@ function LocateButton({ autoLocation, autoError, fallbackCenter }: LocateButtonP
         const coords: [number, number] = [pos.coords.latitude, pos.coords.longitude];
         setLocatedPos(coords);
         setLocating(false);
-        map.flyTo(coords, STARTUP_ZOOM, { animate: true, duration: 1.2 });
+        map.flyTo(coords, LOCATE_ZOOM, { animate: true, duration: 1.2 });
       },
       () => { setLocating(false); showToast(LOCATE_MSG); },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+      { enableHighAccuracy: true, timeout: GEOLOCATION_TIMEOUT_MS, maximumAge: 0 },
     );
   }, [map, showToast]);
 
@@ -255,31 +257,63 @@ export function Map({
   restrooms,
   userLocation,
   geoError,
+  locationLoading,
   defaultCenter,
   auditedIds,
   isAuthenticated,
   onAuditClick,
 }: MapProps) {
+  const [startupTimedOut, setStartupTimedOut] = useState(false);
+
+  useEffect(() => {
+    if (!locationLoading) {
+      setStartupTimedOut(false);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setStartupTimedOut(true);
+    }, GEOLOCATION_TIMEOUT_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [locationLoading]);
+
+  const waitingForLocation = locationLoading && !startupTimedOut;
+
+  if (waitingForLocation) {
+    return (
+      <div className="w-full h-full bg-muted/50 flex items-center justify-center">
+        <span className="text-xs font-medium text-muted-foreground">
+          Finding your location…
+        </span>
+      </div>
+    );
+  }
+
+  const initialCenter: [number, number] = userLocation && !startupTimedOut
+    ? [userLocation.lat, userLocation.lng]
+    : defaultCenter;
+
   return (
-    // Initial center = downtown Dumaguete at zoom 15.
-    // LocateButton will immediately fly to the user if geolocation resolves,
-    // or stay here if it fails — no fitBounds over all 1168 pins ever fires.
     <MapContainer
-      center={defaultCenter}
-      zoom={15}
+      center={initialCenter}
+      zoom={INITIAL_ZOOM}
       className="w-full h-full z-0"
       zoomControl={false}
     >
+      <InitialViewport center={initialCenter} />
+
       <TileLayer
         attribution='&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions" target="_blank" rel="noopener noreferrer">CARTO</a>'
         url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+        keepBuffer={2}
+        updateWhenZooming={false}
       />
 
       {/* Single component owns all user-location logic */}
       <LocateButton
         autoLocation={userLocation}
         autoError={geoError}
-        fallbackCenter={defaultCenter}
       />
 
       {restrooms.map((restroom) => {

@@ -103,6 +103,7 @@ export default function Home() {
           restrooms={filteredRestrooms}
           userLocation={location}
           geoError={geoError}
+          locationLoading={geoLoading}
           defaultCenter={DUMAGUETE_CENTER}
           auditedIds={auditedIds}
           isAuthenticated={isAuthenticated}
