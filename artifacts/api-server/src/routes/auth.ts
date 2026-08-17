@@ -16,6 +16,8 @@ import {
   SESSION_COOKIE,
   SESSION_TTL,
   ISSUER_URL,
+  isDatabaseError,
+  InvalidAuthClaimsError,
   type SessionData,
 } from "../lib/auth";
 
@@ -57,9 +59,54 @@ function getSafeReturnTo(value: unknown): string {
   return value;
 }
 
+function errorStack(error: unknown): string {
+  return error instanceof Error && error.stack
+    ? error.stack
+    : String(error);
+}
+
+function sendAuthError(
+  res: Response,
+  error: unknown,
+  options: {
+    invalidMessage: string;
+    databaseMessage: string;
+    fallbackMessage: string;
+  },
+) {
+  if (res.headersSent) return;
+
+  if (isDatabaseError(error)) {
+    res.status(503).json({
+      error: "Authentication database unavailable",
+      message: options.databaseMessage,
+    });
+    return;
+  }
+
+  if (error instanceof InvalidAuthClaimsError) {
+    res.status(401).json({
+      error: "Authentication failed",
+      message: options.invalidMessage,
+    });
+    return;
+  }
+
+  res.status(503).json({
+    error: "Authentication service unavailable",
+    message: options.fallbackMessage,
+  });
+}
+
 async function upsertUser(claims: Record<string, unknown>) {
+  if (typeof claims.sub !== "string" || claims.sub.trim().length === 0) {
+    throw new InvalidAuthClaimsError(
+      "Authenticated user identity is missing from the provider response",
+    );
+  }
+
   const userData = {
-    id: claims.sub as string,
+    id: claims.sub,
     email: (claims.email as string) || null,
     firstName: (claims.first_name as string) || null,
     lastName: (claims.last_name as string) || null,
@@ -91,100 +138,133 @@ router.get("/auth/user", (req: Request, res: Response) => {
 });
 
 router.get("/login", async (req: Request, res: Response) => {
-  const config = await getOidcConfig();
-  const callbackUrl = `${getOrigin(req)}/api/callback`;
+  try {
+    const config = await getOidcConfig();
+    const callbackUrl = `${getOrigin(req)}/api/callback`;
 
-  const returnTo = getSafeReturnTo(req.query.returnTo);
+    const returnTo = getSafeReturnTo(req.query.returnTo);
 
-  const state = oidc.randomState();
-  const nonce = oidc.randomNonce();
-  const codeVerifier = oidc.randomPKCECodeVerifier();
-  const codeChallenge = await oidc.calculatePKCECodeChallenge(codeVerifier);
+    const state = oidc.randomState();
+    const nonce = oidc.randomNonce();
+    const codeVerifier = oidc.randomPKCECodeVerifier();
+    const codeChallenge = await oidc.calculatePKCECodeChallenge(codeVerifier);
 
-  const redirectTo = oidc.buildAuthorizationUrl(config, {
-    redirect_uri: callbackUrl,
-    scope: "openid email profile offline_access",
-    code_challenge: codeChallenge,
-    code_challenge_method: "S256",
-    prompt: "login consent",
-    state,
-    nonce,
-  });
+    const redirectTo = oidc.buildAuthorizationUrl(config, {
+      redirect_uri: callbackUrl,
+      scope: "openid email profile offline_access",
+      code_challenge: codeChallenge,
+      code_challenge_method: "S256",
+      prompt: "login consent",
+      state,
+      nonce,
+    });
 
-  setOidcCookie(res, "code_verifier", codeVerifier);
-  setOidcCookie(res, "nonce", nonce);
-  setOidcCookie(res, "state", state);
-  setOidcCookie(res, "return_to", returnTo);
+    setOidcCookie(res, "code_verifier", codeVerifier);
+    setOidcCookie(res, "nonce", nonce);
+    setOidcCookie(res, "state", state);
+    setOidcCookie(res, "return_to", returnTo);
 
-  res.redirect(redirectTo.href);
+    res.redirect(redirectTo.href);
+  } catch (error) {
+    console.error(`[auth] Login initialization failed:\n${errorStack(error)}`);
+    sendAuthError(res, error, {
+      invalidMessage: "The login request is invalid. Please try again.",
+      databaseMessage:
+        "We could not access the session database. Please try again shortly.",
+      fallbackMessage:
+        "We could not start login right now. Please try again shortly.",
+    });
+  }
 });
 
 // Query params are not validated because the OIDC provider may include
 // parameters not expressed in the schema.
 router.get("/callback", async (req: Request, res: Response) => {
-  const config = await getOidcConfig();
-  const callbackUrl = `${getOrigin(req)}/api/callback`;
-
-  const codeVerifier = req.cookies?.code_verifier;
-  const nonce = req.cookies?.nonce;
-  const expectedState = req.cookies?.state;
-
-  if (!codeVerifier || !expectedState) {
-    res.redirect("/api/login");
-    return;
-  }
-
-  const currentUrl = new URL(
-    `${callbackUrl}?${new URL(req.url, `http://${req.headers.host}`).searchParams}`,
-  );
-
-  let tokens: oidc.TokenEndpointResponse & oidc.TokenEndpointResponseHelpers;
   try {
-    tokens = await oidc.authorizationCodeGrant(config, currentUrl, {
-      pkceCodeVerifier: codeVerifier,
-      expectedNonce: nonce,
-      expectedState,
-      idTokenExpected: true,
+    const config = await getOidcConfig();
+    const callbackUrl = `${getOrigin(req)}/api/callback`;
+
+    const codeVerifier = req.cookies?.code_verifier;
+    const nonce = req.cookies?.nonce;
+    const expectedState = req.cookies?.state;
+
+    if (!codeVerifier || !expectedState) {
+      res.status(400).json({
+        error: "Invalid login callback",
+        message: "The login session expired. Please start login again.",
+      });
+      return;
+    }
+
+    const currentUrl = new URL(
+      `${callbackUrl}?${new URL(req.url, `http://${req.headers.host}`).searchParams}`,
+    );
+
+    let tokens: oidc.TokenEndpointResponse & oidc.TokenEndpointResponseHelpers;
+    try {
+      tokens = await oidc.authorizationCodeGrant(config, currentUrl, {
+        pkceCodeVerifier: codeVerifier,
+        expectedNonce: nonce,
+        expectedState,
+        idTokenExpected: true,
+      });
+    } catch (error) {
+      console.error(`[auth] Login provider rejected callback:\n${errorStack(error)}`);
+      res.status(401).json({
+        error: "Authentication failed",
+        message:
+          "The login response was invalid or expired. Please start login again.",
+      });
+      return;
+    }
+    const returnTo = getSafeReturnTo(req.cookies?.return_to);
+
+    res.clearCookie("code_verifier", { path: "/" });
+    res.clearCookie("nonce", { path: "/" });
+    res.clearCookie("state", { path: "/" });
+    res.clearCookie("return_to", { path: "/" });
+
+    const claims = tokens.claims();
+    if (!claims) {
+      res.status(401).json({
+        error: "Authentication failed",
+        message: "The identity provider did not return a valid user.",
+      });
+      return;
+    }
+
+    const dbUser = await upsertUser(
+      claims as unknown as Record<string, unknown>,
+    );
+
+    const now = Math.floor(Date.now() / 1000);
+    const sessionData: SessionData = {
+      user: {
+        id: dbUser.id,
+        email: dbUser.email,
+        firstName: dbUser.firstName,
+        lastName: dbUser.lastName,
+        profileImageUrl: dbUser.profileImageUrl,
+      },
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+      expires_at: tokens.expiresIn() ? now + tokens.expiresIn()! : claims.exp,
+    };
+
+    const sid = await createSession(sessionData);
+    setSessionCookie(res, sid);
+    res.redirect(returnTo);
+  } catch (error) {
+    console.error(`[auth] Login callback failed:\n${errorStack(error)}`);
+    sendAuthError(res, error, {
+      invalidMessage:
+        "The login response was invalid or expired. Please start login again.",
+      databaseMessage:
+        "We could not save your login session. Please try again shortly.",
+      fallbackMessage:
+        "We could not complete login right now. Please try again shortly.",
     });
-  } catch {
-    res.redirect("/api/login");
-    return;
   }
-
-  const returnTo = getSafeReturnTo(req.cookies?.return_to);
-
-  res.clearCookie("code_verifier", { path: "/" });
-  res.clearCookie("nonce", { path: "/" });
-  res.clearCookie("state", { path: "/" });
-  res.clearCookie("return_to", { path: "/" });
-
-  const claims = tokens.claims();
-  if (!claims) {
-    res.redirect("/api/login");
-    return;
-  }
-
-  const dbUser = await upsertUser(
-    claims as unknown as Record<string, unknown>,
-  );
-
-  const now = Math.floor(Date.now() / 1000);
-  const sessionData: SessionData = {
-    user: {
-      id: dbUser.id,
-      email: dbUser.email,
-      firstName: dbUser.firstName,
-      lastName: dbUser.lastName,
-      profileImageUrl: dbUser.profileImageUrl,
-    },
-    access_token: tokens.access_token,
-    refresh_token: tokens.refresh_token,
-    expires_at: tokens.expiresIn() ? now + tokens.expiresIn()! : claims.exp,
-  };
-
-  const sid = await createSession(sessionData);
-  setSessionCookie(res, sid);
-  res.redirect(returnTo);
 });
 
 router.get("/logout", async (req: Request, res: Response) => {
@@ -221,12 +301,25 @@ router.post(
       callbackUrl.searchParams.set("state", state);
       callbackUrl.searchParams.set("iss", ISSUER_URL);
 
-      const tokens = await oidc.authorizationCodeGrant(config, callbackUrl, {
-        pkceCodeVerifier: code_verifier,
-        expectedNonce: nonce ?? undefined,
-        expectedState: state,
-        idTokenExpected: true,
-      });
+      let tokens: oidc.TokenEndpointResponse &
+        oidc.TokenEndpointResponseHelpers;
+      try {
+        tokens = await oidc.authorizationCodeGrant(config, callbackUrl, {
+          pkceCodeVerifier: code_verifier,
+          expectedNonce: nonce ?? undefined,
+          expectedState: state,
+          idTokenExpected: true,
+        });
+      } catch (error) {
+        console.error(
+          `[auth] Mobile login provider rejected callback:\n${errorStack(error)}`,
+        );
+        res.status(401).json({
+          error: "Authentication failed",
+          message: "The provided login credentials were invalid or expired.",
+        });
+        return;
+      }
 
       const claims = tokens.claims();
       if (!claims) {
@@ -254,9 +347,15 @@ router.post(
 
       const sid = await createSession(sessionData);
       res.json(ExchangeMobileAuthorizationCodeResponse.parse({ token: sid }));
-    } catch (err) {
-      req.log.error({ err }, "Mobile token exchange error");
-      res.status(500).json({ error: "Token exchange failed" });
+    } catch (error) {
+      console.error(`[auth] Mobile token exchange failed:\n${errorStack(error)}`);
+      sendAuthError(res, error, {
+        invalidMessage:
+          "The provided login credentials were invalid or expired.",
+        databaseMessage:
+          "We could not save your login session. Please try again shortly.",
+        fallbackMessage: "Token exchange failed. Please try again.",
+      });
     }
   },
 );

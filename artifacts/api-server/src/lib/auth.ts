@@ -9,6 +9,13 @@ export const ISSUER_URL = process.env.ISSUER_URL ?? "https://replit.com/oidc";
 export const SESSION_COOKIE = "sid";
 export const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
 
+export class InvalidAuthClaimsError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidAuthClaimsError";
+  }
+}
+
 export interface SessionData {
   user: AuthUser;
   access_token: string;
@@ -20,12 +27,40 @@ let oidcConfig: client.Configuration | null = null;
 
 export async function getOidcConfig(): Promise<client.Configuration> {
   if (!oidcConfig) {
+    if (!process.env.REPL_ID) {
+      throw new Error("REPL_ID is not configured for authentication");
+    }
+
     oidcConfig = await client.discovery(
       new URL(ISSUER_URL),
-      process.env.REPL_ID!,
+      process.env.REPL_ID,
     );
   }
   return oidcConfig;
+}
+
+export function isDatabaseError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+
+  const candidate = error as { code?: unknown; message?: unknown };
+  const code = typeof candidate.code === "string" ? candidate.code : "";
+  const message =
+    typeof candidate.message === "string" ? candidate.message : "";
+
+  return (
+    code.startsWith("08") ||
+    [
+      "ECONNREFUSED",
+      "ECONNRESET",
+      "ETIMEDOUT",
+      "57P01",
+      "57P03",
+      "53300",
+    ].includes(code) ||
+    /failed query|database|postgres|connection|relation .* does not exist/i.test(
+      message,
+    )
+  );
 }
 
 export async function createSession(data: SessionData): Promise<string> {
