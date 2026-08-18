@@ -1,0 +1,40 @@
+The Replit production database is suspended, which is blocking app publishing with the error: "Failed to check for database diff: The endpoint has been disabled."
+
+Please update .replit and configuration files:
+
+Remove any deployment build hooks or scripts that attempt to run database migrations or schema diff checks against Replit DB (DATABASE_URL).
+Ensure the app builds purely as a web application without requiring Replit's managed Postgres instance.
+Restart the workspace workflow so I can republish cleanly.
+13 hours ago
+Assessing database skills and configurations
+
+Assessing database skills and configurations
+I’ll trace the current deployment and database-related commands first, then remove only the hooks that require Replit Postgres while preserving the web/API build and runtime. I’ll also check the workflow configuration before restarting it.
+
+
+
+5 actions
+The scan found a root .replit deployment post-build hook, but the initial search did not show its command contents. I’m opening that file and the package/build definitions now so I can remove the database check at its source rather than disabling unrelated runtime database usage.
+
+
+
+10 actions
+The actual database-triggering paths are now clear: scripts/post-merge.sh runs pnpm --filter db push, and the root .replit invokes that script after merges. The artifact production builds themselves are web/static and API bundling only; I’m checking the DB package initialization before deciding whether the Postgres module can be removed without introducing a build-time failure.
+
+
+
+18 actions
+Before editing the Postgres module declaration, I’m checking Replit’s current publish behavior so I don’t disable the runtime database that the API still uses just to bypass a build-time hook. The goal is to remove publish-time schema work while keeping the existing API artifact from crashing unexpectedly.
+
+
+
+Show less
+Loaded skill deployment
+Loaded skill package-management
+Searching Replit Docs
+
+Searching Replit Docs
+
+Checked Replit publish database behavior
+Searched Replit docs for “Replit deployment schema diff disabled database suspended .replit postBuild DATABASE_URL PostgreSQL module” (4 pages)
+You've reached your daily free quota limit. It will reset at 12:00 AM UTC.
