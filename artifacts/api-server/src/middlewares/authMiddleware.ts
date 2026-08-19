@@ -8,7 +8,6 @@ import {
   getSession,
   updateSession,
   type SessionData,
-  isDatabaseError,
 } from "../lib/auth";
 
 declare global {
@@ -63,75 +62,22 @@ export async function authMiddleware(
     return this.user != null;
   } as Request["isAuthenticated"];
 
-  // Starting or completing a login must not be blocked by a stale session
-  // cookie or a temporarily unavailable session store. These routes establish
-  // or validate authentication themselves.
-  if (
-    ["/api/login", "/api/callback", "/api/mobile-auth/token-exchange"].includes(
-      req.path,
-    )
-  ) {
-    next();
-    return;
-  }
-
   const sid = getSessionId(req);
   if (!sid) {
     next();
     return;
   }
 
-  let session: SessionData | null;
-  try {
-    session = await getSession(sid);
-  } catch (error) {
-    const detail = error instanceof Error ? error.stack : String(error);
-    console.error(`[auth] Session lookup failed:\n${detail}`);
-
-    // Do not let a stale/broken session cookie prevent the user from
-    // starting a new login. The session store failure is explicit so clients
-    // can distinguish it from an unauthenticated request.
-    res.clearCookie("sid", { path: "/" });
-    res.status(isDatabaseError(error) ? 503 : 401).json({
-      error: isDatabaseError(error)
-        ? "Authentication session store unavailable"
-        : "Invalid authentication session",
-      message: isDatabaseError(error)
-        ? "We could not verify your session. Please try again shortly."
-        : "Your session is invalid or expired. Please log in again.",
-    });
-    return;
-  }
-
+  const session = await getSession(sid);
   if (!session?.user?.id) {
-    try {
-      await clearSession(res, sid);
-    } catch (error) {
-      const detail = error instanceof Error ? error.stack : String(error);
-      console.error(`[auth] Invalid session cleanup failed:\n${detail}`);
-      res.clearCookie("sid", { path: "/" });
-    }
+    await clearSession(res, sid);
     next();
     return;
   }
 
-  let refreshed: SessionData | null;
-  try {
-    refreshed = await refreshIfExpired(sid, session);
-  } catch (error) {
-    const detail = error instanceof Error ? error.stack : String(error);
-    console.error(`[auth] Session refresh failed:\n${detail}`);
-    refreshed = null;
-  }
-
+  const refreshed = await refreshIfExpired(sid, session);
   if (!refreshed) {
-    try {
-      await clearSession(res, sid);
-    } catch (error) {
-      const detail = error instanceof Error ? error.stack : String(error);
-      console.error(`[auth] Expired session cleanup failed:\n${detail}`);
-      res.clearCookie("sid", { path: "/" });
-    }
+    await clearSession(res, sid);
     next();
     return;
   }

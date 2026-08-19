@@ -72,7 +72,7 @@ export function RestroomCard({ name, latitude, longitude, address, access, fee, 
 
         <button
           onClick={openDirections}
-          className="flex-shrink-0 flex flex-col items-center justify-center w-12 h-12 rounded-xl bg-primary/10 text-primary hover:bg-primary/20 transition-colors duration-75"
+          className="flex-shrink-0 flex flex-col items-center justify-center w-12 h-12 rounded-xl bg-primary/10 text-primary hover:bg-primary hover:text-primary-foreground hover:shadow-lg hover:shadow-primary/25 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-200"
           aria-label="Get Directions"
         >
           <Navigation className="w-4 h-4 mb-0.5" />
