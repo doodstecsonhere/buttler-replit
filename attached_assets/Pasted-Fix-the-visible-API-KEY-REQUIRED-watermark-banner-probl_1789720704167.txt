@@ -1,0 +1,152 @@
+Fix the visible "API KEY REQUIRED" watermark/banner problem on Buttler's map.
+
+IMPORTANT: This is a surgical map-provider fix. Do not redesign Buttler, change the restroom/bidet dataset, change marker styling, change geolocation behavior, modify authentication, change the sidebar/UI, or make unrelated refactors.
+
+CURRENT PROBLEM
+
+The current Replit version of Buttler uses a CARTO basemap/tile endpoint that now displays repeated diagonal:
+
+"API KEY REQUIRED"
+
+watermarks across the map.
+
+The map itself works, but these watermarks make the application look broken and must be eliminated.
+
+We have ALREADY solved this exact problem in Buttler's separate independent/Cloudflare Pages repository.
+
+Use that implementation as the reference architecture.
+
+REFERENCE FIX FROM THE INDEPENDENT BUTTLER VERSION
+
+The old problematic Leaflet tile layer used:
+
+https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png
+
+The independent Buttler repository removed CARTO entirely and replaced it with the standard OpenStreetMap online tile endpoint:
+
+https://tile.openstreetmap.org/{z}/{x}/{y}.png
+
+with proper visible OpenStreetMap attribution.
+
+The reference implementation essentially uses:
+
+const OSM_TILE_URL =
+  'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+
+const OSM_ATTRIBUTION =
+  '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors';
+
+and the Leaflet TileLayer uses that URL and attribution instead of CARTO.
+
+The independent implementation also:
+
+1. Removes CARTO attribution.
+2. Removes all cartocdn/CARTO tile references.
+3. Does NOT require an API key, account, payment card, trial, or paid map provider.
+4. Does not service-worker-prefetch or persist third-party map tiles.
+5. Keeps the existing Leaflet map, restroom markers, bidet markers, marker popups, user-location marker, pan, zoom, and geolocation functionality.
+6. Gracefully handles tile/network failure without breaking the restroom-location functionality.
+
+OBJECTIVE
+
+Port ONLY the relevant map-provider fix into THIS Replit version of Buttler.
+
+FIRST inspect the current repository and identify:
+
+- the Leaflet Map/TileLayer implementation;
+- every CARTO/cartocdn reference;
+- any map-tile runtime/service-worker caching;
+- any environment variable or API-key logic associated with the current map provider.
+
+Then make the smallest safe change necessary.
+
+PREFERRED SOLUTION
+
+If compatible with this Replit version, replace the CARTO tile source with:
+
+https://tile.openstreetmap.org/{z}/{x}/{y}.png
+
+and use proper OpenStreetMap attribution.
+
+Do NOT merely hide, cover, blur, crop, CSS-mask, or overlay the "API KEY REQUIRED" watermark.
+
+The underlying CARTO tile source must stop being requested.
+
+Do NOT obtain or add a CARTO API key just to preserve the existing provider.
+
+Do NOT introduce Mapbox, Google Maps, HERE, or another provider requiring a key, billing account, credit card, paid tier, or temporary trial.
+
+ZERO-BUDGET REQUIREMENT
+
+The solution must remain genuinely zero-cost for the current scale of Buttler and must not require me to create a new account, enter billing information, or manage a map API secret.
+
+PRESERVE CURRENT BEHAVIOR
+
+The screenshot/current Replit version is otherwise working well.
+
+Do not alter:
+
+- current map layout or dimensions;
+- restroom/bidet marker design or colors;
+- marker positions;
+- clustering/overlap behavior, if any;
+- sidebar;
+- search;
+- filters;
+- "Go" buttons;
+- user-location marker;
+- geolocation/recentering;
+- map zoom/pan behavior;
+- database/data;
+- authentication;
+- responsive layout;
+- unrelated styling.
+
+The purpose of this task is specifically to make the ugly "API KEY REQUIRED" map watermark disappear by fixing its actual cause.
+
+OFFLINE / SERVICE WORKER SAFETY
+
+Inspect the PWA/service-worker configuration.
+
+If this Replit version currently caches CARTO tiles, remove that CARTO tile caching.
+
+Do not add bulk downloading, prefetching, or persistent service-worker caching of OpenStreetMap standard tiles.
+
+Normal browser HTTP caching is fine.
+
+Do not claim that street-map tiles work offline if they do not.
+
+VERIFICATION
+
+After implementing the fix:
+
+1. Start Buttler normally in the Replit development environment.
+2. Open the map.
+3. Confirm that actual street-map tiles render.
+4. Confirm there is ZERO visible "API KEY REQUIRED" text anywhere on the map.
+5. Confirm the browser/network requests no longer request:
+   - cartocdn.com
+   - basemaps.cartocdn.com
+   - CARTO tile endpoints
+6. Confirm visible attribution correctly credits OpenStreetMap contributors.
+7. Confirm restroom and bidet markers still render in their existing styles.
+8. Confirm marker popups still work.
+9. Confirm pan and zoom still work.
+10. Confirm user geolocation/recentering still works as before.
+11. Confirm search, filters, sidebar cards, and Go buttons were not affected.
+12. Run the project's existing typecheck/tests/build where available.
+
+If OpenStreetMap's standard tile endpoint is incompatible for a concrete technical reason, STOP before selecting another provider and explain the incompatibility and the zero-cost/keyless alternatives. Do not silently introduce another map service.
+
+At completion, report:
+
+A. Root cause found
+B. Files changed
+C. Exact old tile provider/URL
+D. Exact new tile provider/URL
+E. Whether all CARTO references were removed
+F. Whether service-worker CARTO tile caching existed and, if so, whether it was removed
+G. Verification results
+H. Any remaining limitations
+
+Keep this change narrowly scoped. Do not make unrelated improvements.

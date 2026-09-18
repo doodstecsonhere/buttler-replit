@@ -75,38 +75,8 @@ export default defineConfig({
         navigateFallback: "index.html",
         navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [
-          // ── Map tiles (CARTO) ── CacheFirst, 30-day TTL, 2000 tiles ─────────
-          // Zoom levels 13–18 over Dumaguete City.  Already-viewed tiles will
-          // render fully offline without any extra user action.
-          {
-            urlPattern: /^https:\/\/[a-z]\.basemaps\.cartocdn\.com\/.*/i,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "map-tiles-carto",
-              expiration: {
-                maxEntries: 2000,
-                maxAgeSeconds: 60 * 60 * 24 * 30,
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
-          },
-          // ── OSM tiles (fallback / future tile layer changes) ─────────────────
-          {
-            urlPattern: /^https:\/\/[a-z]\.tile\.openstreetmap\.org\/.*/i,
-            handler: "CacheFirst",
-            options: {
-              cacheName: "map-tiles-osm",
-              expiration: {
-                maxEntries: 2000,
-                maxAgeSeconds: 60 * 60 * 24 * 30,
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
-          },
+          // Map tiles intentionally use normal browser caching only. Do not
+          // persist or bulk-cache third-party map tiles in the service worker.
           // ── Restroom data ── StaleWhileRevalidate keeps the cache fresh ──────
           // The app's own localStorage hook is the primary offline fallback;
           // this secondary Workbox cache ensures the /api/restrooms response is
